@@ -15,7 +15,7 @@ class VectorDBManager:
         self.model_name = embedding_model_name
         self.dimension = self._get_dimension()
 
-        # Index + metadata initialize karo
+        # Initialize index and metadata store
         self.index = None
         self.metadata_store = []
         self._load_or_create_index()
@@ -23,7 +23,7 @@ class VectorDBManager:
     # ─────────────── Index Load / Create ───────────────
 
     def _load_or_create_index(self):
-        """Agar pehle se saved index hai toh load karo, warna naya banao."""
+        """Load existing saved index if available, otherwise create a new one."""
         index_file = f"{self.vectordb_path}/index.faiss"
         meta_file = f"{self.vectordb_path}/metadata.pkl"
 
@@ -32,19 +32,19 @@ class VectorDBManager:
             with open(meta_file, "rb") as f:
                 self.metadata_store = pickle.load(f)
         else:
-            # Naya khali index — IndexFlatIP = Cosine Similarity (normalized vectors ke saath)
+            # New empty index — IndexFlatIP = Cosine Similarity with L2 normalized vectors
             self.index = faiss.IndexFlatIP(self.dimension)
             self.metadata_store = []
 
     # ─────────────── Embed (Ollama API) ───────────────
 
     def _get_dimension(self) -> int:
-        """Pehli baar ek dummy embed karke dimension pata karo."""
+        """Determine vector dimension by generating a test embedding."""
         test_embed = self._embed_single("test")
         return len(test_embed)
 
     def _embed_single(self, text: str) -> list:
-        """Ek text ka embedding Ollama se lo."""
+        """Fetch embedding vector for a single string from Ollama API."""
         response = requests.post(
             OLLAMA_EMBED_URL,
             json={"model": self.model_name, "input": text}
@@ -53,7 +53,7 @@ class VectorDBManager:
         return response.json()["embeddings"][0]
 
     def _embed(self, texts: list) -> np.ndarray:
-        """Texts ko vectors mein convert karo + normalize (cosine similarity ke liye)."""
+        """Convert list of text strings into normalized L2 float32 vector arrays (for cosine similarity)."""
         embeddings = []
         for text in texts:
             embeddings.append(self._embed_single(text))
@@ -65,18 +65,18 @@ class VectorDBManager:
 
     def add_documents(self, texts: list, metadatas: list = None, doc_id: str = "default") -> str:
         """
-        Documents embed karke index mein daalo.
+        Embed documents and add them into the FAISS index.
 
         Args:
-            texts: ["OPEX means expenses", "REV is net revenue"]
-            metadatas: [{"type": "column_meaning"}, {"type": "few_shot"}]  (optional)
-            doc_id: kis file/upload se aaya — "sales.csv", "data_dict.txt", etc.
+            texts: ["OPEX means operating expenses", "REV is net revenue"]
+            metadatas: [{"type": "column_meaning"}, {"type": "few_shot"}] (optional)
+            doc_id: Source file/upload identifier — "sales.csv", "data_dict.txt", etc.
 
         Returns:
-            Status message
+            Status message string
         """
         if metadatas and len(texts) != len(metadatas):
-            raise ValueError("texts aur metadatas ki length match honi chahiye")
+            raise ValueError("Length of texts and metadatas lists must match")
 
         if metadatas is None:
             metadatas = [{} for _ in texts]
@@ -98,23 +98,23 @@ class VectorDBManager:
 
     def search(self, query: str, top_k: int = 5, doc_id: str = None, filter_type: str = None) -> list:
         """
-        Question pucho, similar documents milenge.
+        Search vector store for top-K similar documents matching the query.
 
         Args:
             query: "What is OPEX_V2?"
-            top_k: kitne results chahiye
-            doc_id: optional — sirf ek specific dataset mein search
-            filter_type: optional — "column_meaning" ya "few_shot"
+            top_k: Number of results to return
+            doc_id: Optional — restrict search to a specific document/dataset
+            filter_type: Optional — "column_meaning" or "few_shot"
 
         Returns:
-            [{"text": "...", "score": 0.95, "doc_id": "...", ...}, ...]
+            List of matching document metadata dictionaries with similarity scores
         """
         if self.index.ntotal == 0:
             return []
 
         query_embedding = self._embed([query])
 
-        # Extra candidates nikalo — filter ke baad kam reh sakte hain
+        # Retrieve candidate vectors (extra candidate space for post-filtering)
         search_k = min(self.index.ntotal, max(top_k * 5, 20))
         scores, indices = self.index.search(query_embedding, search_k)
 
@@ -124,7 +124,7 @@ class VectorDBManager:
                 continue
             meta = self.metadata_store[idx]
 
-            # Filters
+            # Apply filters
             if meta.get("user_id") != self.user_id:
                 continue
             if doc_id and meta.get("doc_id") != doc_id:
@@ -142,8 +142,8 @@ class VectorDBManager:
 
     def delete_by_doc(self, doc_id: str) -> str:
         """
-        Ek document ke sare vectors hatao (jaise re-upload pe purana data delete karo).
-        FAISS IndexFlatIP mein direct delete nahi hota — rebuild karna padta hai.
+        Remove all vectors associated with a specific document ID.
+        Rebuilds FAISS IndexFlatIP to flush old items.
         """
         keep_indices = [
             i for i, meta in enumerate(self.metadata_store)
@@ -156,7 +156,7 @@ class VectorDBManager:
 
         old_metadata = self.metadata_store
 
-        # Naya index banao bache hue vectors ke saath
+        # Re-initialize index with remaining vectors
         self.index = faiss.IndexFlatIP(self.dimension)
         self.metadata_store = []
 
@@ -172,7 +172,7 @@ class VectorDBManager:
     # ─────────────── Save / Load ───────────────
 
     def _save(self):
-        """Index + metadata disk pe save karo."""
+        """Save index and metadata store to disk."""
         os.makedirs(self.vectordb_path, exist_ok=True)
         faiss.write_index(self.index, f"{self.vectordb_path}/index.faiss")
         with open(f"{self.vectordb_path}/metadata.pkl", "wb") as f:

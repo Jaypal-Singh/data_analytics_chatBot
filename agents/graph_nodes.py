@@ -5,14 +5,21 @@ from database.vector_db import VectorDBManager
 from schemas.models import QueryType, SQLResult, ChartResult, FinalResponse, TableResult
 
 
+from core.graph_state import GraphState
+from core.llm_client import llm
+from database.duckdb_manager import DuckDBClient
+from database.vector_db import VectorDBManager
+from schemas.models import QueryType, SQLResult, ChartResult, FinalResponse, TableResult
+
+
 def supervisor_node(state: GraphState) -> GraphState:
-    """Question classify karo — general / analytical / both"""
+    """Classify user question intent — general / analytical / hybrid"""
     state["query_type"] = llm.classify_query(state["question"], state.get("chat_history"))
     return state
 
 
 def rag_node(state: GraphState) -> GraphState:
-    """Vector DB se relevant context fetch karo — column meanings, few-shot examples"""
+    """Fetch relevant context from Vector DB — column meanings, domain context"""
     vdb = VectorDBManager(state["user_id"])
     results = vdb.search(
         query=state["question"],
@@ -24,28 +31,28 @@ def rag_node(state: GraphState) -> GraphState:
 
 
 def sql_agent_node(state: GraphState) -> GraphState:
-    """Schema + RAG context + Chat history lekar SQL generate karo, fir DuckDB pe run karo"""
+    """Generate SQL query using schema, RAG context, and chat history, then execute on DuckDB"""
     db = DuckDBClient(state["user_id"])
 
-    # Schema string banao (LLM prompt ke liye)
+    # Construct schema context for LLM prompt
     schema_str = db.get_full_context()
 
-    # RAG context format karo
+    # Format RAG context
     rag_context = state.get("rag_context", [])
     context_str = "\n".join([item.get("text", "") if isinstance(item, dict) else str(item) for item in rag_context]) if rag_context else "No additional context available."
 
-    # Check: retry hai ya first attempt?
+    # Check if this is a retry attempt or first attempt
     prev_result = state.get("sql_result")
     if prev_result and not prev_result.success:
-        # Self-healing — fix karo
+        # Self-healing — fix SQL query using error traceback
         sql = llm.fix_sql(prev_result.sql_query, prev_result.error, schema_str)
         retries = prev_result.retries_used + 1
     else:
-        # First attempt — generate karo (with chat history)
+        # First attempt — generate SQL query with chat history
         sql = llm.generate_sql(state["question"], schema_str, context_str, state.get("chat_history"))
         retries = 0
 
-    # DuckDB pe run karo
+    # Execute query on DuckDB
     query_result = db.run_query(sql)
     db.close()
 
@@ -61,7 +68,7 @@ def sql_agent_node(state: GraphState) -> GraphState:
 
 
 def chart_node(state: GraphState) -> GraphState:
-    """SQL result se matplotlib chart code generate + execute karo"""
+    """Generate and execute matplotlib chart code from SQL query results"""
     # Skip chart for GENERAL queries
     if state.get("query_type") == QueryType.GENERAL:
         state["chart_result"] = ChartResult(success=True, chart_base64=None, error="General query - visual chart skipped")
@@ -86,7 +93,7 @@ def chart_node(state: GraphState) -> GraphState:
     import base64
     import io
 
-    # Check: retry hai ya first attempt?
+    # Check if this is a retry attempt or first attempt
     prev_chart = state.get("chart_result")
     if prev_chart and not prev_chart.success:
         code = llm.fix_chart_code(prev_chart.error, prev_chart.error)
@@ -95,7 +102,7 @@ def chart_node(state: GraphState) -> GraphState:
         code = llm.generate_chart_code(sql_res.columns, sql_res.rows[:5])
         retries = 0
 
-    # Code execute karo
+    # Execute chart generation code
     try:
         df = pd.DataFrame(sql_res.rows, columns=sql_res.columns)
         plt.clf()
@@ -103,10 +110,10 @@ def chart_node(state: GraphState) -> GraphState:
         sns.set_theme(style="whitegrid")
         fig, ax = plt.subplots(figsize=(10, 6))
 
-        # LLM ka code execute karo with seaborn & numpy available
+        # Execute LLM code with seaborn & numpy available
         exec(code, {"df": df, "plt": plt, "pd": pd, "sns": sns, "np": np, "ax": ax, "fig": fig})
 
-        # Chart ko base64 mein convert karo
+        # Convert chart figure to base64 string
         buf = io.BytesIO()
         plt.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor="white")
         plt.close('all')
@@ -126,16 +133,16 @@ def chart_node(state: GraphState) -> GraphState:
 
 
 def reporting_node(state: GraphState) -> GraphState:
-    """Final summary + response combine karo"""
+    """Synthesize final summary response combining query results and chart context"""
     sql_res = state.get("sql_result")
     chart_res = state.get("chart_result")
 
-    # Schema & dataset context fetch 
+    # Fetch schema & dataset context
     db = DuckDBClient(state["user_id"])
     schema_context = db.get_full_context()
     db.close()
 
-    # Data preview + schema context combine 
+    # Combine data preview and schema context
     data_preview = f"DATASET SCHEMA & FEATURES:\n{schema_context}\n\n"
     if sql_res and sql_res.success:
         data_preview += f"SQL QUERY EXECUTED:\n{sql_res.sql_query}\n\nQUERY RESULTS:\nColumns: {sql_res.columns}\nRows Sample: {sql_res.rows[:10]}"
@@ -144,7 +151,7 @@ def reporting_node(state: GraphState) -> GraphState:
 
     summary = llm.generate_summary(state["question"], data_preview, state.get("chat_history"))
 
-    # Final response assemble karo
+    # Assemble final response object
     state["final_response"] = FinalResponse(
         summary_text=summary,
         chart_base64=chart_res.chart_base64 if chart_res and chart_res.success else None,

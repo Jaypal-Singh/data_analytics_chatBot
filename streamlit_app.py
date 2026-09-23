@@ -27,7 +27,7 @@ def _clean_json_val(val):
     return val
 
 def load_user_threads_from_disk(user_id: str) -> dict:
-    """Disk (JSON) se user ke threads load karo taaki 2 din baad bhi chat history & docs same milein."""
+    """Load user chat threads from disk JSON to persist history and active documents across sessions."""
     os.makedirs(THREADS_STORAGE_DIR, exist_ok=True)
     file_path = os.path.join(THREADS_STORAGE_DIR, f"{user_id}.json")
     if os.path.exists(file_path):
@@ -56,7 +56,7 @@ def load_user_threads_from_disk(user_id: str) -> dict:
     return default_threads
 
 def save_user_threads_to_disk(user_id: str, threads_data: dict):
-    """User ke sare threads, active doc, aur chat history ko disk (JSON) pe permanently save karo."""
+    """Permanently save user threads, active document links, and chat history to disk JSON."""
     os.makedirs(THREADS_STORAGE_DIR, exist_ok=True)
     file_path = os.path.join(THREADS_STORAGE_DIR, f"{user_id}.json")
     try:

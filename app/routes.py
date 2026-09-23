@@ -15,7 +15,7 @@ UPLOAD_DIR = "storage/uploads"
 
 
 def _sanitize_table_name(filename: str) -> str:
-    """Filename se safe table name banao."""
+    """Generate a safe database table name from a filename."""
     name = os.path.splitext(os.path.basename(filename))[0]
     name = re.sub(r"[^a-zA-Z0-9_]", "_", name)
     name = re.sub(r"_+", "_", name).strip("_")
@@ -27,7 +27,7 @@ async def upload_file(
     user_id: str = Form(...),
     file: UploadFile = File(...),
 ):
-    """CSV upload karke user ke DuckDB mein table banata hai."""
+    """Upload CSV file and create table in user's DuckDB instance."""
 
     # File type check
     if not file.filename.endswith(".csv"):
@@ -39,12 +39,12 @@ async def upload_file(
     os.makedirs(user_upload_dir, exist_ok=True)
     save_path = os.path.join(user_upload_dir, safe_filename)
 
-    # File save karo
+    # Save file contents
     content = await file.read()
     with open(save_path, "wb") as f:
         f.write(content)
 
-    # DuckDB mein table banao
+    # Create table in DuckDB
     table_name = _sanitize_table_name(file.filename)
     db = DuckDBClient(user_id)
     try:
@@ -66,12 +66,12 @@ async def upload_file(
 
 @router.post("/query", response_model=FinalResponse)
 def handle_query(request: QueryRequest):
-    """Main endpoint — poora LangGraph pipeline yahan trigger hota hai."""
+    """Main endpoint — triggers full LangGraph multi-agent pipeline."""
 
-    # Table name figure out karo
+    # Derive table name from doc_id
     table_name = _sanitize_table_name(request.doc_id) if request.doc_id else None
 
-    # Check table exists
+    # Check if table exists
     db = DuckDBClient(request.user_id)
     tables = db.list_tables()
     db.close()
@@ -79,10 +79,10 @@ def handle_query(request: QueryRequest):
     if not table_name or table_name not in tables:
         raise HTTPException(
             status_code=400,
-            detail=f"Table '{table_name}' not found. Available: {tables}. Pehle /upload karo."
+            detail=f"Table '{table_name}' not found. Available: {tables}. Please upload the dataset first."
         )
 
-    # LangGraph pipeline invoke karo
+    # Invoke LangGraph pipeline
     initial_state = {
         "user_id": request.user_id,
         "doc_id": request.doc_id or "",
@@ -109,7 +109,7 @@ def handle_query(request: QueryRequest):
 
 @router.get("/tables/{user_id}")
 def list_user_tables(user_id: str):
-    """User ke DuckDB mein available tables dikhaao."""
+    """List available tables in user's DuckDB instance."""
     db = DuckDBClient(user_id)
     tables = db.list_tables()
     db.close()
@@ -118,7 +118,7 @@ def list_user_tables(user_id: str):
 
 @router.get("/schema/{user_id}/{table_name}")
 def get_table_schema(user_id: str, table_name: str):
-    """Table ka schema + sample values return karo."""
+    """Return table schema and categorical column samples."""
     db = DuckDBClient(user_id)
     try:
         schema = db.get_schema(table_name)

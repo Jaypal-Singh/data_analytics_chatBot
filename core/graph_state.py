@@ -4,7 +4,7 @@ from schemas.models import QueryType, SQLResult, ChartResult, RAGContextItem, Fi
 
 
 class GraphState(TypedDict):
-    """LangGraph ka shared state — har node isko read/update karta hai."""
+    """LangGraph shared state — read and updated by each workflow node."""
     user_id: str
     doc_id: str
     question: str

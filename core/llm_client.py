@@ -18,7 +18,7 @@ class LLMClient:
 
     @traceable(name="Ollama LLM Call")
     def _call(self, system_prompt: str, user_prompt: str) -> str:
-        """Ollama API se LLM call karo — response text return hoga."""
+        """Call Ollama API — returns response text string."""
         try:
             response = requests.post(
                 OLLAMA_CHAT_URL,
@@ -39,7 +39,7 @@ class LLMClient:
 
     @traceable(name="Ollama LLM Stream")
     def _call_stream(self, system_prompt: str, user_prompt: str):
-        """Ollama API se token-by-token stream yield karo."""
+        """Yield token-by-token stream from Ollama API."""
         try:
             response = requests.post(
                 OLLAMA_CHAT_URL,
@@ -65,7 +65,7 @@ class LLMClient:
             yield f" [Error streaming: {str(e)}]"
 
     def _format_chat_history(self, chat_history: list[dict] = None) -> str:
-        """Chat history ko LLM prompt ke liye string format mein covert karo."""
+        """Format chat history list into a readable string for the LLM prompt."""
         if not chat_history:
             return "No previous conversation history."
         formatted = []
@@ -92,7 +92,7 @@ class LLMClient:
     # SQL
     @traceable(name="Generate SQL")
     def generate_sql(self, question: str, schema: str, rag_context: str, chat_history: list[dict] = None) -> str:
-        """Schema + context + chat history to generate SQl quiry."""
+        """Generate SQL query using schema, context, and chat history."""
         history_str = self._format_chat_history(chat_history)
         full_rag = f"{rag_context}\n\nPAST CONVERSATION HISTORY:\n{history_str}"
         system = GENERATE_SQL_SYSTEM_PROMPT.format(schema=schema, rag_context=full_rag)
@@ -100,7 +100,7 @@ class LLMClient:
         sql = sql.replace("```sql", "").replace("```", "").strip()
         return sql
 
-    # if SQL Query failed thne SQL query fix
+    # if SQL Query failed then SQL query fix
     @traceable(name="Fix SQL")
     def fix_sql(self, failed_query: str, error: str, schema: str) -> str:
         system = FIX_SQL_SYSTEM_PROMPT.format(
@@ -132,14 +132,14 @@ class LLMClient:
 
     @traceable(name="Generate Summary")
     def generate_summary(self, question: str, data_preview: str, chat_history: list[dict] = None) -> str:
-        """Data + chat history se human-readable summary banao."""
+        """Generate human-readable summary from data preview and chat history."""
         history_str = self._format_chat_history(chat_history)
         user_prompt = f"PAST CONVERSATION:\n{history_str}\n\nQuestion: {question}\nData: {data_preview}"
         return self._call(SUMMARY_SYSTEM_PROMPT, user_prompt)
 
     @traceable(name="Stream Summary")
     def generate_summary_stream(self, question: str, data_preview: str, chat_history: list[dict] = None):
-        """Data + chat history se summary stream karo (token-by-token)."""
+        """Stream human-readable summary token-by-token from data preview and chat history."""
         history_str = self._format_chat_history(chat_history)
         user_prompt = f"PAST CONVERSATION:\n{history_str}\n\nQuestion: {question}\nData: {data_preview}"
         return self._call_stream(SUMMARY_SYSTEM_PROMPT, user_prompt)

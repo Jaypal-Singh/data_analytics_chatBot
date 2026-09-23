@@ -1,0 +1,35 @@
+# Core Frameworks & Agents
+langchain
+langgraph
+langsmith
+langchain-community
+langchain-core
+pathlib
+# Vector Databases & Embeddings (RAG)
+faiss-gpu
+sentence-transformers
+tiktoken
+duckdb
+# Document Loaders & Parsers (RAG)
+pypdf
+unstructured
+python-docx
+pandas
+numpy
+matplotlib
+seaborn
+
+
+# Tools & Web Search for Agents
+duckduckgo-search
+requests
+
+# Environment & Utilities
+python-dotenv
+pydantic
+
+# API / Backend Server & UI
+fastapi
+uvicorn
+python-multipart
+streamlit

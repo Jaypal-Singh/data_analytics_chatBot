@@ -18,26 +18,88 @@ An intelligent, multi-agent AI system for interactive data analytics, automated 
 
 ## 🏗️ Architecture & Workflow
 
-The system uses **LangGraph** to manage state and control flow across multiple specialized agent nodes:
+The system implements an end-to-end multi-agent pipeline designed for both structured (CSV/Excel) and unstructured (PDF/Doc) data analytics:
 
 ```mermaid
-graph TD
-    A[User Query Input] --> B[Supervisor Node]
-    B -->|General Query| F[Reporting / Final LLM Node]
-    B -->|Analytical Query| C[RAG Context Node]
-    C --> D[SQL Agent Node]
-    D -->|SQL Error| D
-    D -->|SQL Success| E[Chart Generation Node]
-    E --> F
-    F --> G[Streamlit Token Streaming UI]
+flowchart TD
+    %% Upload / Data Ingestion Branch
+    subgraph Data_Ingestion ["1. Data Ingestion & Storage"]
+        UP[Upload DOC / CSV]
+        UP -->|Unstructured Data| EMB[Embedding Document Content] --> VDB[(Vector DB / ChromaDB / FAISS)]
+        UP -->|Structured Data| DSTORE[Store Data Tables] --> DDB[(DuckDB Database)]
+    end
+
+    %% Supervisor Agent Router
+    UQ[User Question\nGeneral / Analytical / Graph / Table] --> SUP[Supervisor Agent]
+    
+    subgraph Supervisor_Layer ["2. Supervisor Agent Router"]
+        SUP --> SUP_LLM["LLM Router\nIdentify Question Nature & Context"]
+        SUP_LLM --> CLASSIFY{"Query Classification"}
+        CLASSIFY -->|Analytical / SQL Needed| RAG[RAG Researcher\nFetch Column Meanings & Context]
+        CLASSIFY -->|Both Analytical & General| PARALLEL[Parallel Execution Mode]
+    end
+
+    %% SQL Generation & Execution Loop
+    subgraph SQL_Pipeline ["3. SQL Agent & DuckDB Execution Engine"]
+        RAG --> SQL_AGENT[SQL Agent + RAG Context\nGenerate SQL Query]
+        SQL_AGENT --> LLM_EXEC[LLM Call with Data & Schema Context]
+        LLM_EXEC --> RUN_DUCKDB[Run Query on DuckDB]
+        
+        %% Self Healing SQL Loop
+        RUN_DUCKDB -->|Query Error| ERR_RETRY[Call LLM again + with Error & Context]
+        ERR_RETRY --> SQL_AGENT
+    end
+
+    RUN_DUCKDB -->|No Error| FETCHED[DuckDB Fetched Data\nQuery Type: Analytical / General / RAG Context]
+
+    %% Parallel Execution Path
+    PARALLEL --> PAR_ANALYTICAL[Analytical Branch: LLM Call with Prompt] --> PAR_READ1[Convert into Readable Format]
+    PARALLEL --> PAR_GENERAL[General Branch] --> PAR_READ2[Convert into Readable Format]
+    PAR_READ1 --> REPORTING
+    PAR_READ2 --> REPORTING
+
+    %% Analytical vs General Branching post-SQL
+    FETCHED -->|Analytical Query| MATPLOT_PROMPT[LLM Call Prompt:\nGenerate Matplotlib Code]
+    FETCHED -->|General Query| GEN_READABLE[Convert into Readable Format]
+
+    %% Python Subprocess & Chart Generation Loop
+    subgraph Chart_Pipeline ["4. Visualization Subprocess Engine"]
+        MATPLOT_PROMPT --> SUBPROC[Run Subprocess & Execute Python Code\nGenerate Graph Artifact]
+        SUBPROC -->|Subprocess Error| ERR_PY[Call LLM with Error] --> MATPLOT_PROMPT
+        SUBPROC -->|No Error| IMG_FMT[Make Image Formatted]
+    end
+
+    %% Reporting & Synthesis
+    IMG_FMT --> REPORTING[Reporting Agent:\nMake Full Summary & Proper Answer]
+    GEN_READABLE --> REPORTING
+    REPORTING --> UI[Streamlit UI / Token Streaming Output]
 ```
 
-### Node Workflow Breakdown:
-1. **Supervisor Node**: Classifies user query type based on context and question intent.
-2. **RAG Node**: Retrieves relevant table schemas, column descriptions, or document chunks from vector storage.
-3. **SQL Agent Node**: Generates DuckDB SQL queries, executes them safely, and triggers self-healing retry loops if an error occurs.
-4. **Chart Node**: Inspects query results and user intent to write and execute Matplotlib/Seaborn visualization code.
-5. **Reporting Node**: Synthesizes tabular data, chart artifacts, and conversational history into a cohesive response.
+---
+
+### 🔄 Workflow Step-by-Step Breakdown
+
+1. **Data Ingestion**:
+   - **Unstructured Data (Docs/PDFs)**: Processed via embeddings and stored in Vector DB (ChromaDB / FAISS).
+   - **Structured Data (CSVs/Excel)**: Loaded into DuckDB for ultra-fast SQL execution.
+
+2. **Supervisor Agent**:
+   - Identifies question nature using LLM and context.
+   - Determines query output requirements: SQL query, analytical graph, or general text summary.
+   - Triggers **Parallel Execution** if user requests both analytical charts and text summaries simultaneously.
+
+3. **RAG Researcher & Self-Healing SQL Agent**:
+   - RAG Researcher retrieves relevant column meanings, table schemas, and domain context.
+   - SQL Agent generates DuckDB-compliant SQL query.
+   - **Self-Healing Loop**: If DuckDB throws a syntax or execution error, the error traceback is sent back to the LLM for automated self-correction.
+
+4. **Visualization Engine (Subprocess Execution)**:
+   - For analytical graph queries, the LLM generates Matplotlib/Seaborn python code.
+   - Code is executed in an isolated **Subprocess**.
+   - If a execution error occurs, the error is fed back to the LLM to self-correct the code until a formatted chart image is generated.
+
+5. **Reporting Agent**:
+   - Combines DuckDB analytical results, formatted chart images, and RAG document contexts to synthesize a comprehensive final answer delivered token-by-token on Streamlit UI.
 
 ---
 
